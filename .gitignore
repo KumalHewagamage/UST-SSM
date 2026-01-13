@@ -4,3 +4,4 @@
 *.pyc
 /modules/build
 /modules/dist
+/outputs

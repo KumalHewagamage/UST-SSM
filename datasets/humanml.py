@@ -18,8 +18,8 @@ class HumanML3D(Dataset):
         ...
         report.json
 
-        For each sequence this dataset returns:
-            - clip: numpy array of shape (frames_per_clip, num_points, 4) (float32)
+    For each sequence this dataset returns:
+      - clip: numpy array of shape (frames_per_clip, num_points, 3) (float32)
       - sentence: string (random sentence from report description during train, first sentence during test)
       - index: integer sequence index
 
@@ -62,21 +62,19 @@ class HumanML3D(Dataset):
         return len(self.sequences)
 
     def _parse_pcd_ascii(self, pcd_path):
-        """Parse an ASCII .pcd file and return Nx4 numpy array of [x,y,z,gray].
+        """Parse an ASCII .pcd file and return Nx3 numpy array of xyz.
 
-        This parser reads the header until 'DATA ascii' and then parses subsequent
-        lines. It expects at least x y z. If RGB is available it will compute a
-        grayscale value (0-1) and use that as the 4th channel. RGB may be
-        provided either as a packed integer (single column) or as three
-        separate columns. If RGB is missing, the 4th channel will be 0.
+        This is a lightweight parser that reads the header until 'DATA ascii' and
+        then parses subsequent lines assuming first three columns are x y z.
         """
-        pts = []
+        xyz_list = []
         with open(pcd_path, 'r') as f:
             header_ended = False
             for line in f:
                 line = line.strip()
                 if not header_ended:
-                    if line.upper().startswith('DATA'):
+                    if line.startswith('DATA'):
+                        # expecting 'DATA ascii'
                         header_ended = True
                     continue
                 if line == '':
@@ -88,56 +86,18 @@ class HumanML3D(Dataset):
                     x = float(parts[0])
                     y = float(parts[1])
                     z = float(parts[2])
+                    xyz_list.append((x, y, z))
                 except ValueError:
+                    # skip malformed lines
                     continue
-
-                # default grayscale
-                gray = 0.0
-
-                # try to detect RGB information
-                # case A: three separate rgb columns present at indices 6,7,8 or 3,4,5 etc.
-                use_rgb_triplet = False
-                if len(parts) >= 9:
-                    try:
-                        r = float(parts[6])
-                        g = float(parts[7])
-                        b = float(parts[8])
-                        use_rgb_triplet = True
-                    except Exception:
-                        use_rgb_triplet = False
-
-                if use_rgb_triplet:
-                    # normalize assuming 0-255 range
-                    r = max(0.0, min(255.0, r))
-                    g = max(0.0, min(255.0, g))
-                    b = max(0.0, min(255.0, b))
-                    gray = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0
-                else:
-                    # case B: packed integer in one column (commonly column 6)
-                    if len(parts) >= 7:
-                        try:
-                            packed = float(parts[6])
-                            packed_int = int(packed)
-                            r = (packed_int >> 16) & 0xFF
-                            g = (packed_int >> 8) & 0xFF
-                            b = packed_int & 0xFF
-                            gray = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0
-                        except Exception:
-                            # leave gray as default 0.0
-                            pass
-
-                pts.append((x, y, z, gray))
-
-        if len(pts) == 0:
-            return np.zeros((0, 4), dtype=np.float32)
-        return np.array(pts, dtype=np.float32)
+        if len(xyz_list) == 0:
+            print(f"Warning: no points found in {pcd_path}", file=sys.stderr)
+            pass
+        return np.array(xyz_list, dtype=np.float32)
 
     def _sample_points(self, pts):
-        """Sample exactly `self.num_points` from pts (np.array Nx4)."""
+        """Sample exactly `self.num_points` from pts (np.array Nx3)."""
         n = pts.shape[0]
-        if n == 0:
-            # return zeros if empty
-            return np.zeros((self.num_points, 4), dtype=np.float32)
         if n >= self.num_points:
             idx = np.random.choice(n, size=self.num_points, replace=False)
             return pts[idx, :]
@@ -151,47 +111,71 @@ class HumanML3D(Dataset):
             return pts[idxs, :]
 
     def __getitem__(self, idx):
-        seq = self.sequences[idx]
-        frames = seq['frames']
-        num_frames_available = len(frames)
-
-        # center anchor frame
-        mid = num_frames_available // 2
-        start = mid - (self.frames_per_clip // 2)
-        # build indices clamped to [0, num_frames_available-1]
-        indices = [min(max(0, start + i), num_frames_available - 1) for i in range(self.frames_per_clip)]
-
-        clip_frames = []
-        for fi in indices:
-            pcd_path = frames[fi]
-            pts = self._parse_pcd_ascii(pcd_path)  # (P,4)
-            sampled = self._sample_points(pts)  # (num_points,4)
-            clip_frames.append(sampled)
-
-        # clip shape: (frames_per_clip, num_points, 4)
-        clip = np.stack(clip_frames, axis=0).astype(np.float32)
-
-        # read report.json and extract sentences
-        sentences = []
-        if seq['report'] is not None:
+        # Try to load sample, skip corrupted ones
+        max_attempts = 10
+        for attempt in range(max_attempts):
             try:
-                with open(seq['report'], 'r') as f:
-                    j = json.load(f)
-                    desc = j.get('description', '')
-                    # split by '.' and strip
-                    parts = [s.strip() for s in desc.split('.')]
-                    sentences = [s for s in parts if len(s) > 0]
-            except Exception:
+                current_idx = (idx + attempt) % len(self.sequences)
+                seq = self.sequences[current_idx]
+                frames = seq['frames']
+                num_frames_available = len(frames)
+
+                # center anchor frame
+                mid = num_frames_available // 2
+                start = mid - (self.frames_per_clip // 2)
+                # build indices clamped to [0, num_frames_available-1]
+                indices = [min(max(0, start + i), num_frames_available - 1) for i in range(self.frames_per_clip)]
+
+                clip_frames = []
+                for fi in indices:
+                    pcd_path = frames[fi]
+                    pts = self._parse_pcd_ascii(pcd_path)  # (P,3)
+                    
+                    # Skip if no points found
+                    if pts.shape[0] == 0:
+                        print(f"Warning: no points found in {pcd_path}")
+                        raise ValueError(f"Empty point cloud: {pcd_path}")
+                    
+                    sampled = self._sample_points(pts)  # (num_points,3)
+                    clip_frames.append(sampled)
+
+                # clip shape: (frames_per_clip, num_points, 3)
+                clip = np.stack(clip_frames, axis=0).astype(np.float32)
+
+                # read report.json and extract sentences
                 sentences = []
+                if seq['report'] is not None:
+                    try:
+                        with open(seq['report'], 'r') as f:
+                            j = json.load(f)
+                            desc = j.get('description', '')
+                            # split by '.' and strip
+                            parts = [s.strip() for s in desc.split('.')]
+                            sentences = [s for s in parts if len(s) > 0]
+                    except Exception:
+                        sentences = []
 
-        if len(sentences) == 0:
-            sentence = ''
-        else:
-            if self.train:
-                sentence = random.choice(sentences)
-            else:
-                sentence = sentences[0]
+                # Ensure we have at least one sentence
+                if len(sentences) == 0:
+                    sentences = ["No description available"]
+                
+                if self.train:
+                    sentence = random.choice(sentences)
+                else:
+                    sentence = sentences[0]
 
-        return clip, sentence, idx
+                return clip, sentence
+                
+            except (ValueError, ZeroDivisionError, IndexError, FileNotFoundError) as e:
+                # Skip corrupted sample and try next one
+                if attempt == 0:
+                    print(f"Warning: Skipping corrupted sample at index {current_idx}: {e}")
+                continue
+        
+        # If all attempts fail, return a dummy sample
+        print(f"Error: Could not load valid sample after {max_attempts} attempts, returning dummy data")
+        dummy_clip = np.zeros((self.frames_per_clip, self.num_points, 3), dtype=np.float32)
+        dummy_sentence = "dummy sample"
+        return dummy_clip, dummy_sentence
 
 
