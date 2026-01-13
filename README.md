@@ -50,6 +50,66 @@ Point cloud videos capture dynamic 3D motion while reducing the effects of light
         pip install --upgrade https://github.com/unlimblue/KNN_CUDA/releases/download/0.2/KNN_CUDA-0.2-py3-none-any.whl
         ```
 
+    Build notes & troubleshooting
+    -----------------------------
+
+    If you run into build or import errors when compiling the custom CUDA layers, here are the exact checks and commands that worked in this repository's setup and common fixes:
+
+    - Activate the environment and check `nvcc` and PyTorch CUDA:
+
+    ```bash
+    conda activate ssm
+    which nvcc || echo "nvcc not found in PATH"
+    nvcc --version || true
+    python -c "import torch; print('torch.version.cuda =', torch.version.cuda, 'torch.cuda.is_available() =', torch.cuda.is_available())"
+    ```
+
+    - If `nvcc` is not found in the conda env but is available on the system (for example `/usr/local/cuda/bin/nvcc` or `/usr/bin/nvcc`), point the build to the system CUDA (no system CUDA install/upgrade required):
+
+    ```bash
+    export PATH=/usr/local/cuda/bin:$PATH    # or /usr/bin if nvcc is there
+    export CUDA_HOME=/usr/local/cuda         # path to your system CUDA
+    ```
+
+    - Install the `KNN_CUDA` wheel (used by this repo):
+
+    ```bash
+    pip install --upgrade https://github.com/unlimblue/KNN_CUDA/releases/download/0.2/KNN_CUDA-0.2-py3-none-any.whl
+    ```
+
+    - Build the PointNet++ CUDA extension (from the repo):
+
+    ```bash
+    cd modules
+    python setup.py install
+    cd ..
+    ```
+
+    - Common import error: `ImportError: libc10.so: cannot open shared object file`
+
+    If you see this when trying `import pointnet2._ext`, set `LD_LIBRARY_PATH` so the loader can find the conda env libraries and PyTorch libs:
+
+    ```bash
+    export CONDA_PREFIX=$(conda info --base)/envs/ssm   # optional helper; replace with your env path if needed
+    export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$CONDA_PREFIX/lib/python3.8/site-packages/torch/lib:$LD_LIBRARY_PATH
+    python -c "import pointnet2._ext as _ext; print('loaded', _ext)"
+    ```
+
+    Note: on this machine we used `/home/avishka/anaconda3/envs/ssm` for `CONDA_PREFIX` in the commands above.
+
+    - Minor CUDA-version mismatch warning
+
+    You may see a non-fatal warning like "detected CUDA version (12.0) mismatches the version that was used to compile PyTorch (12.1)". In many cases that is harmless and the extension will still compile successfully; if you see hard failures then either install a PyTorch wheel that matches your system CUDA or point the environment to a matching `nvcc`.
+
+    If you prefer not to compile CUDA ops, you can try installing a prebuilt `pointnet2` package (may not match exactly):
+
+    ```bash
+    pip install git+https://github.com/erikwijmans/Pointnet2_PyTorch.git
+    ```
+
+    If that succeeds, you can skip `python setup.py install`. Otherwise follow the build steps above.
+
+
 For a detailed environment setup, please refer to the `requirements.yml` file.
 
 -----
