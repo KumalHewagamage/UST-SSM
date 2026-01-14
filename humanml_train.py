@@ -23,17 +23,17 @@ from tqdm import tqdm
 
 
 from datasets.humanml import HumanML3D
-from scheduler import WarmupMultiStepLR
+from torch.optim.lr_scheduler import MultiStepLR
 from models.UST import UST
 from models.clip_encoder import create_text_encoder
-from tensorboard_logger import TensorBoardLogger
+from modules.tensorboard_logger import TensorBoardLogger
 # ==============================================================================
 # 1. CONFIGURATION
 # ==============================================================================
 
 class Config:
     # --- Experiment Settings ---
-    experiment_name = "ust_4d_grounding_v1"
+    experiment_name = "ust_4d_grounding_v5"
     output_dir = "./outputs"
     seed = 42
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -47,11 +47,11 @@ class Config:
     
     # --- Model Hyperparameters (UST) ---
     model_params = {
-        'radius': 0.3,
-        'nsamples': 32,
+        'radius': 0.3, # 0.3
+        'nsamples': 32, # 32
         'spatial_stride': 32,
         'temporal_kernel_size': 3,
-        'temporal_stride': 2,
+        'temporal_stride': 2, # 2
         'dim': 160,
         'heads': 6,
         'mlp_dim': 320,
@@ -76,7 +76,7 @@ class Config:
     # --- Scheduler Settings ---
     lr_milestones = [20, 30] # Epochs to step LR
     lr_gamma = 0.1
-    warmup_epochs = 3 # Approx 10 epochs worth of iterations
+
 
     # --- Loss Settings ---
     temperature = 0.07
@@ -114,11 +114,11 @@ def set_seed(seed):
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
-def save_checkpoint(state, is_best, output_dir, filename='checkpoint.pth.tar'):
+def save_checkpoint(state, is_best, output_dir, filename='checkpoint.pth'):
     filepath = os.path.join(output_dir, filename)
     torch.save(state, filepath)
     if is_best:
-        best_path = os.path.join(output_dir, 'model_best.pth.tar')
+        best_path = os.path.join(output_dir, 'model_best.pth')
         torch.save(state, best_path)
 
 
@@ -389,28 +389,28 @@ def main():
         freeze_encoder=True,
         add_projection=False
     )
+    # Ensure text encoder is frozen (no grads) and in eval mode
+    text_encoder.eval()
+    for p in text_encoder.parameters():
+        p.requires_grad = False
     
     text_projection = nn.Linear(483,512).to(Config.device)
 
     # 4. Optimization
+    # Train both the UST model and the projection head; keep text encoder frozen
+    params = list(model.parameters()) + list(text_projection.parameters())
     optimizer = torch.optim.SGD(
-        model.parameters(), 
-        lr=Config.lr, 
-        momentum=Config.momentum, 
+        params,
+        lr=Config.lr,
+        momentum=Config.momentum,
         weight_decay=Config.weight_decay
     )
 
-    # Calculate actual steps for scheduler
-    steps_per_epoch = len(train_loader)
-    warmup_iters = Config.warmup_epochs * steps_per_epoch
-    milestone_iters = [m * steps_per_epoch for m in Config.lr_milestones]
-    
-    lr_scheduler = WarmupMultiStepLR(
+    # Scheduler: use epoch-based MultiStepLR (no warmup)
+    lr_scheduler = MultiStepLR(
         optimizer, 
-        milestones=milestone_iters, 
-        gamma=Config.lr_gamma,
-        warmup_iters=warmup_iters, 
-        warmup_factor=1e-5
+        milestones=Config.lr_milestones, 
+        gamma=Config.lr_gamma
     )
 
     criterion = TextActionAlignment(temperature=Config.temperature).to(Config.device)
