@@ -62,7 +62,7 @@ def right_shift(binary, k=1, axis=-1):
 
     return shifted
 
-def gray2binary(gray, axis=-1)
+def gray2binary(gray, axis=-1):
     shift = 2 ** (torch.Tensor([gray.shape[axis]]).log2().ceil().int() - 1)
     while shift > 0:
         gray = torch.logical_xor(gray, right_shift(gray, shift))

@@ -256,7 +256,7 @@ class UST(nn.Module):
         outputs_concat = outputs# [key_output, output0, output1, output2, ...]
         output = torch.cat(outputs_concat, dim=1)  # [B, dim//2 + hos_branches_num * C_out]
 
-        output = self.mlp_head(output)  # [B, num_classes]
+        # output = self.mlp_head(output)  # [B, num_classes]
 
         return output
 

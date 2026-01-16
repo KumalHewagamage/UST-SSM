@@ -14,23 +14,23 @@ from einops import rearrange, repeat
 try:
     from causal_conv1d import causal_conv1d_fn, causal_conv1d_update
 except ImportError:
-    causal_conv1d_fn, causal_conv1d_update = None
-    
-import sys
-sys.path.append(r"/data2/POINT4D/UST-SSM/modules/bimamba_ssm_old")
-from ops.selective_scan_interface import selective_scan_fn, mamba_inner_fn, bimamba_inner_fn, mamba_inner_fn_no_out_proj
-# except ImportError:
-#     selective_scan_fn, mamba_inner_fn, bimamba_inner_fn, mamba_inner_fn_no_out_proj = None, None, None, None
+    causal_conv1d_fn = None
+    causal_conv1d_update = None
 
-# try:
-from ops.triton.selective_state_update import selective_state_update
-# except ImportError:
-#     selective_state_update = None
+try:
+    from ..ops.selective_scan_interface import selective_scan_fn, mamba_inner_fn, bimamba_inner_fn, mamba_inner_fn_no_out_proj
+except ImportError:
+    selective_scan_fn, mamba_inner_fn, bimamba_inner_fn, mamba_inner_fn_no_out_proj = None, None, None, None
 
-# try:
-from ops.triton.layernorm import RMSNorm, layer_norm_fn, rms_norm_fn
-# except ImportError:
-#     RMSNorm, layer_norm_fn, rms_norm_fn = None, None, None
+try:
+    from ..ops.triton.selective_state_update import selective_state_update
+except ImportError:
+    selective_state_update = None
+
+try:
+    from ..ops.triton.layernorm import RMSNorm, layer_norm_fn, rms_norm_fn
+except ImportError:
+    RMSNorm, layer_norm_fn, rms_norm_fn = None, None, None
 
 
 class Mamba(nn.Module):

@@ -33,7 +33,7 @@ from modules.tensorboard_logger import TensorBoardLogger
 
 class Config:
     # --- Experiment Settings ---
-    experiment_name = "ust_4d_grounding_v5"
+    experiment_name = "ust_4d_grounding_v6"
     output_dir = "./outputs"
     seed = 42
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -47,7 +47,7 @@ class Config:
     
     # --- Model Hyperparameters (UST) ---
     model_params = {
-        'radius': 0.3, # 0.3
+        'radius': 0.7, # 0.3
         'nsamples': 32, # 32
         'spatial_stride': 32,
         'temporal_kernel_size': 3,
@@ -57,7 +57,7 @@ class Config:
         'mlp_dim': 320,
         'num_classes': 20, # Note: Check if this matches your dataset classes
         'dropout': 0.0,
-        'depth': 1,
+        'depth': 1, # 1
         'hos_branches_num': 3,
         'encoder_channel': 60
     }
