@@ -20,14 +20,20 @@ class MSRAction3D(Dataset):
         if self.split not in ['train', 'test']:
             raise ValueError("Split must be 'train' or 'test'")
 
+        # Store actual video metadata here
+        self.video_data = [] 
+        # Store (video_idx, start_frame_idx) tuples here
         self.samples = [] 
+        
         self._load_data()
 
     def _load_data(self):
         search_path = os.path.join(self.root, '*')
         all_paths = glob.glob(search_path)
         
-        count = 0
+        # Hardcoded sampling interval (stride)
+        step = 1 
+        
         for path in all_paths:
             if not os.path.isdir(path): continue
 
@@ -44,13 +50,41 @@ class MSRAction3D(Dataset):
                 if (self.split == 'train' and is_train_subject) or \
                    (self.split == 'test' and not is_train_subject):
                     
-                    pcd_files = glob.glob(os.path.join(path, '*.pcd'))
-                    if len(pcd_files) > 0:
-                        self.samples.append({'path': path, 'label': label})
-                        count += 1
+                    # Pre-load file paths to calculate windows
+                    pcd_files = sorted(glob.glob(os.path.join(path, '*.pcd')))
+                    n_frames = len(pcd_files)
+                    
+                    if n_frames > 0:
+                        video_idx = len(self.video_data)
+                        
+                        # --- Sliding Window Logic ---
+                        if self.split == 'train':
+                            # TRAIN: Dense Sliding Window
+                            if n_frames >= self.frames_per_clip:
+                                for t in range(0, n_frames - self.frames_per_clip + 1, step):
+                                    self.samples.append((video_idx, t))
+                            else:
+                                self.samples.append((video_idx, 0))
+                        else:
+                            # TEST: Single Centered Clip (Disabled sliding window)
+                            if n_frames >= self.frames_per_clip:
+                                # Calculate start index to center the clip
+                                center_start = (n_frames - self.frames_per_clip) // 2
+                                self.samples.append((video_idx, center_start))
+                            else:
+                                self.samples.append((video_idx, 0))
+
+                        # Store metadata
+                        self.video_data.append({
+                            'path': path, 
+                            'label': label,
+                            'files': pcd_files
+                        })
+                        
             except (IndexError, ValueError):
                 continue
-        print(f"[{self.split.upper()}] Loaded {count} sequences.")
+                
+        print(f"[{self.split.upper()}] Loaded {len(self.video_data)} videos, expanded to {len(self.samples)} clips.")
 
     def _parse_pcd(self, pcd_path):
         xyz = []
@@ -87,14 +121,17 @@ class MSRAction3D(Dataset):
         return len(self.samples)
 
     def __getitem__(self, idx):
-        sample = self.samples[idx]
-        files = sorted(glob.glob(os.path.join(sample['path'], '*.pcd')))
+        # Retrieve the pre-calculated indices
+        video_idx, start_frame = self.samples[idx]
         
-        # Temporal Sampling
+        video_info = self.video_data[video_idx]
+        files = video_info['files']
+        label = video_info['label']
+        
         n_frames = len(files)
-        mid = n_frames // 2
-        start = max(0, mid - (self.frames_per_clip // 2))
-        indices = [min(start + i, n_frames - 1) for i in range(self.frames_per_clip)]
+        
+        # Calculate indices based on sliding window start
+        indices = [min(start_frame + i, n_frames - 1) for i in range(self.frames_per_clip)]
         
         clips = []
         for i in indices:
@@ -102,4 +139,4 @@ class MSRAction3D(Dataset):
             clips.append(self._sample(pts))
             
         clip = np.stack(clips).astype(np.float32) 
-        return clip, sample['label']
+        return clip, label
